@@ -1,0 +1,28 @@
+# 环境变量与密钥（千万不能上传！只上传 .env.example）
+.env
+.env.*
+!.env.example
+
+# Python 虚拟环境与缓存
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+src/*.egg-info/
+build/
+dist/
+
+# 测试与工具缓存
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+.DS_Store
+Thumbsumbs.db
