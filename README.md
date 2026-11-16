@@ -10,42 +10,42 @@
 
 ```mermaid
 flowchart TD
-    START([提交问题]) --> ROUTE{入口路由}
-    ROUTE -->|常规诊断| SUP[sup: 分析问题与信息缺口]
-    ROUTE -->|unknown 工单重核| EXEC_SUB
+    START([用户提交问题]) --> ROUTE{入口路由}
+    ROUTE -->|常规诊断| SUP[Supervisor：分析问题与信息缺口]
+    ROUTE -->|待核实工单重试| EXEC_SUB
 
-    SUP -->|缺少信息| ASK[ask: interrupt 追问]
-    ASK -->|恢复| SUP
-    SUP -->|需要调查| PLAN[plan: 生成调查计划]
-    SUP -->|证据充分| DECIDE
+    SUP -->|缺少必要信息| ASK[保存状态并暂停<br/>等待用户补充]
+    ASK -->|补充后恢复| SUP
+    SUP -->|需要调查| PLAN[生成本轮调查计划与分配预算]
+    SUP -->|已有充分证据| DECIDE
 
-    PLAN --> EXEC[exec: 并发执行 Knowledge / Operations Agent<br/>独立上下文 & 限时等待]
-    EXEC --> MERGE[merge: 汇总证据与异常]
-    MERGE --> DECIDE{decide: 下一步}
+    PLAN --> EXEC[调查执行节点<br/>并发启动知识诊断与运行诊断 Agent<br/>各自独立上下文 & 限时等待]
+    EXEC --> MERGE[Supervisor 汇总证据<br/>识别部分失败、冲突与信息缺口]
+    MERGE --> DECIDE{决定下一步}
 
-    DECIDE -->|继续调查| PLAN
-    DECIDE -->|需用户补充| ASK
-    DECIDE -->|输出建议或预算耗尽| ANSWER[answer: 输出建议与引用]
-    DECIDE -->|转工单| DRAFT[draft: 生成工单草稿]
+    DECIDE -->|继续调查且有预算| PLAN
+    DECIDE -->|需要用户补充| ASK
+    DECIDE -->|输出建议或预算耗尽| ANSWER[输出排查建议、引用与不确定性说明]
+    DECIDE -->|进入工单流程| DRAFT[生成工单草稿]
 
-    DRAFT --> REVIEW[review: interrupt 人工审核]
-    REVIEW -->|edit| EDIT[edit: 修改草稿 version+1]
+    DRAFT --> REVIEW[保存状态并暂停<br/>等待用户审核]
+    REVIEW -->|修改| EDIT[更新草稿内容并递增版本号]
     EDIT --> REVIEW
-    REVIEW -->|cancel| CANCEL[cancel: 取消]
-    REVIEW -->|approve| PREP_SUB[prepare_submission: 固定快照与幂等键落盘]
-    PREP_SUB --> EXEC_SUB[execute_submission: LOOKUP + 事务写入]
+    REVIEW -->|取消| CANCEL[取消工单流程]
+    REVIEW -->|确认| PREP_SUB[固定提交内容与幂等键并持久化]
+    PREP_SUB --> EXEC_SUB[按幂等键查询与数据库事务写入<br/>唯一约束冲突回滚重查]
 
-    ANSWER --> END([结束])
+    ANSWER --> END([保存状态并结束])
     CANCEL --> END
     EXEC_SUB --> END
 ```
 
 ## 核心设计
 
-- **主子状态隔离**：主图 `SupportState` 仅保存对话、轮次计划、证据字典与工单状态（由 PostgreSQL Checkpointer 持久化）；子 Agent 的消息流与工具调用记录隔离在局部 `AgentLocalState` 中，由 `exec` 节点统一限时等待并收敛为 `DiagnosisResult`。
+- **主子状态隔离**：主图 `SupportState` 仅保存对话、轮次计划、证据字典与工单状态（由 PostgreSQL Checkpointer 持久化）；子 Agent 的消息流与工具调用记录隔离在局部 `AgentLocalState` 中，由调查执行节点统一限时等待并收敛为 `DiagnosisResult`。
 - **混合检索与溯源**：知识诊断基于 `BGE-M3` (`pgvector`) + `BM25` 双路召回与 `RRF` 融合排序，定制分词保留错误码与配置项标识，按产品版本过滤并记录分块来源。
 - **工具容错与限次重试**：使用 Pydantic 校验工具入参和出参。区分入参错误（回喂模型自纠）与出参契约损坏（当轮局部熔断）；运行诊断按 `task_id + tool_name + args` 生成逻辑调用 ID，对瞬时超时/连接异常最多原地重试 1 次，跨循环不重置计数。
-- **工单审核与幂等提交**：利用 `interrupt` 实现草稿审核与带版本号修改。确认后先在 `prepare_submission` 节点固化提交快照与 `idempotency_key` 落盘，再进入 `execute_submission` 执行数据库唯一约束与事务写入；遇到提交结果未知（`unknown`）时保留原快照，支持从图入口直接路由重查恢复。
+- **工单审核与幂等提交**：利用 `interrupt` 实现草稿审核与带版本号修改。确认后先固化提交快照与 `idempotency_key` 落盘，再执行数据库唯一约束与事务写入；遇到提交结果未知（`unknown`）时保留原快照，支持从图入口直接路由重查恢复。
 
 ---
 
@@ -56,9 +56,9 @@ supportflow/
 ├── src/supportflow/
 │   ├── state.py / schemas.py / config.py / deps.py
 │   ├── context_policy.py        # 上下文投影与工具输出截断
-│   ├── graph.py                 # 13 节点 LangGraph 主图编排
+│   ├── graph.py                 # LangGraph 主图编排与路由
 │   ├── agents/runner.py         # 通用子 Agent 循环执行器
-│   ├── nodes/                   # investigation / supervisor / ticket 节点
+│   ├── nodes/                   # 调查执行、Supervisor 与工单节点
 │   ├── tools/                   # knowledge (混合检索) / operations (4类业务工具)
 │   ├── persistence/             # PostgreSQL 连接池与幂等工单事务服务
 │   └── api/                     # FastAPI 服务端 (server.py) 与 Streamlit 界面 (ui.py)
