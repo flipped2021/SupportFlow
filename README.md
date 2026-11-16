@@ -19,7 +19,7 @@ flowchart TD
     SUP -->|需要调查| PLAN[生成本轮调查计划与分配预算]
     SUP -->|已有充分证据| DECIDE
 
-    PLAN --> EXEC[调查执行节点<br/>并发启动知识诊断与运行诊断 Agent<br/>各自独立上下文 & 限时等待]
+    PLAN --> EXEC[调查执行节点<br/>并发启动知识诊断与运行诊断 Agent<br/>各自独立上下文，限时等待]
     EXEC --> MERGE[Supervisor 汇总证据<br/>识别部分失败、冲突与信息缺口]
     MERGE --> DECIDE{决定下一步}
 
