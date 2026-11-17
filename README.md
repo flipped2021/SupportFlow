@@ -42,7 +42,7 @@ flowchart TD
 
 ## 核心设计
 
-- **主子状态隔离**：主图 `SupportState` 仅保存对话、轮次计划、证据字典与工单状态（由 PostgreSQL Checkpointer 持久化）；子 Agent 的消息流与工具调用记录隔离在局部 `AgentLocalState` 中，由调查执行节点统一限时等待并收敛为 `DiagnosisResult`。
+- **主子状态隔离与上下文治理**：主图 `SupportState` 仅保存对话、轮次计划、证据字典与工单状态（由 PostgreSQL Checkpointer 持久化）；子 Agent 的消息流与工具调用记录隔离在局部 `AgentLocalState` 中，由调查执行节点统一限时等待并收敛为 `DiagnosisResult`。
 - **混合检索与溯源**：知识诊断基于 `BGE-M3` (`pgvector`) + `BM25` 双路召回与 `RRF` 融合排序，定制分词保留错误码与配置项标识，按产品版本过滤并记录分块来源。
 - **工具容错与限次重试**：使用 Pydantic 校验工具入参和出参。区分入参错误（回喂模型自纠）与出参契约损坏（当轮局部熔断）；运行诊断按 `task_id + tool_name + args` 生成逻辑调用 ID，对瞬时超时/连接异常最多原地重试 1 次，跨循环不重置计数。
 - **工单审核与幂等提交**：利用 `interrupt` 实现草稿审核与带版本号修改。确认后先固化提交快照与 `idempotency_key` 落盘，再执行数据库唯一约束与事务写入；遇到提交结果未知（`unknown`）时保留原快照，支持从图入口直接路由重查恢复。
